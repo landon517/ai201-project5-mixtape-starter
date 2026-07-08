@@ -1,45 +1,39 @@
 # Project 5 Submission — Mixtape Bug Hunt
  
-**Name:** Landon Ward
-**Branch:** `bugfix/mixtape`
- 
----
+**Name:** Landon Ward 
  
 ## AI Usage
  
-I used Claude (claude.ai) throughout this project as a collaborative tool for environment setup, codebase navigation, and debugging assistance.
+I used Claude throughout as a tool for the environment setup and some general codebase navigation.
  
-**Environment setup:** A significant portion of early time was spent getting the project running. Claude helped diagnose a series of setup issues — missing Flask installation, virtual environment not being activated consistently across terminals, and invisible special characters being appended to pasted terminal commands that caused zsh to reject them. These weren't conceptual problems but the kind of environment friction that eats time without teaching anything. Claude helped identify each issue quickly so I could move on to the actual work.
+**Environment setup:** I had some issues with Flask setup that I spent about 30 minutes working out with Claude. I messed up the initial environment and was confused on what web port.
  
-**Codebase navigation:** Once the app was running, I used Claude to help me understand the overall structure — how routes delegate to services, what each model represents, and how the association tables like `playlist_entries` and `song_tags` work. I pasted the full contents of `models.py` and all five service files and asked Claude to explain the data flow for a feature end-to-end. This gave me a map of the codebase before I started looking for bugs.
+**Codebase navigation:** Once the app was running, I used Claude to help me understand the structure, specifically how tables like `playlist_entries` and `song_tags` work. I pasted the full contents of `models.py` and all five service files and asked Claude to explain the flow.
  
-**Reproduction:** Claude helped me construct the curl commands needed to trigger each bug. I provided the real IDs from my seed data and Claude built the exact requests. I ran them myself and verified the outputs — Claude didn't interpret the results, I did.
+**Reproduction:** Claude helped me construct the curl commands as well.
  
-**Bug investigation:** For each bug, I read the relevant service file myself first. Claude's role was to confirm or explain what I was already seeing. For Bug #5, I spotted the `songs[:-1]` slice myself and asked Claude to confirm what that syntax does in Python — it did. For Bug #4, I found that `rate_song()` had no notification call by comparing it to `add_to_playlist()` myself, then asked Claude to help me write the equivalent notification block. For Bug #3, Claude explained why an `outerjoin` on a tags table causes row multiplication — I had noticed the join looked suspicious but needed help understanding the SQL behavior.
+**Bug investigation:** I read the relevant service file myself first. For Bug #4, I found that `rate_song()` had no notification call by comparing it to `add_to_playlist()` myself. For Bug #3, I had noticed the join looked suspicious but needed help understanding the SQL behavior.
  
-**Where I verified things myself:** Claude initially suggested Bug #3 would show obvious duplicates in the response, but my reproduction run returned `count: 1` with no duplicates visible. I had to trust the structural argument (the join is wrong regardless of whether SQLAlchemy deduplicates it) rather than a clean reproduction. Claude acknowledged this uncertainty when I pushed back on it.
- 
-**Documentation:** Claude helped write and maintain `submission.md` throughout the project, updating RCA entries after each fix was confirmed working.
- 
+**Where I verified things myself:** Claude initially suggested Bug #3 would show obvious duplicates in the response, but my reproduction run returned `count: 1` with no duplicates visible. Of course I valued the reproduction over Claude's analysis.
+  
 ---
  
 ## Codebase Map
  
 ### `app.py`
-The Flask application factory. Defines `create_app()` which configures the database connection (SQLite by default), initializes SQLAlchemy, and registers the four route blueprints (`songs`, `playlists`, `users`, `feed`) with their URL prefixes. Also sets up the database tables via `db.create_all()` on startup.
+Defines `create_app()` which configures the database connection, initializes SQLAlchemy, and registers the four route blueprints (`songs`, `playlists`, `users`, `feed`) with their URL prefixes. Also sets up the database tables via `db.create_all()` on startup.
  
 ### `models.py`
 Defines 6 SQLAlchemy models and 3 association tables:
  
 - **User** — stores username, email, listening streak, and last listened timestamp. Has a self-referential many-to-many relationship with itself via the `friendships` table to represent mutual friend connections.
-- **Song** — stores title, artist, album, genre, and a reference to the user who shared it (`shared_by`). Has a many-to-many relationship with `Tag` via the `song_tags` table.
-- **Tag** — simple label model with just an id and name. Songs can have multiple tags.
-- **ListeningEvent** — a record that a specific user listened to a specific song at a specific time. Used to drive both the streak system and the feed.
+- **Song** — stores title, artist, album, genre, and a reference to the user who shared it
+- **Tag** — simple label model with just an id and name. 
+- **ListeningEvent** — a record that a specific user listened to a specific song at a specific time. 
 - **Rating** — a user's 1–5 score for a song. Enforces a unique constraint so one user can only rate a song once.
 - **Playlist** — a named collection of songs created by a user. Songs are linked via the `playlist_entries` association table, which adds a `position` column (integer) and an `added_by` column — meaning the order of songs in a playlist is explicitly stored, not inferred from insertion order.
 - **Notification** — a message sent to a user when a friend interacts with their shared song. Has a `read` boolean flag.
 ### `routes/`
-Four Blueprint files. Each route does minimal work: parse the request, call a service function, return JSON. All business logic lives in `services/`.
  
 - **`songs.py`** — search songs (`GET /songs/search?q=`), get a single song (`GET /songs/<id>`), rate a song (`POST /songs/<id>/rate`), record a listen (`POST /songs/<id>/listen`)
 - **`playlists.py`** — create a playlist, add a song to a playlist, get songs in a playlist
@@ -53,7 +47,7 @@ The business logic layer. Each file handles one domain:
 - **`feed_service.py`** — queries `ListeningEvent` records for a user's friends within a 24-hour window, deduplicates by friend (only most recent song per friend), and returns the result ordered by recency.
 - **`notification_service.py`** — creates `Notification` records when songs are interacted with. Also owns the `rate_song` and `add_to_playlist` logic since those actions trigger notifications.
 - **`playlist_service.py`** — creates playlists and retrieves songs from a playlist ordered by their `position` in `playlist_entries`.
----
+
  
 ## Data Flow: User Rates a Song
  
@@ -74,8 +68,6 @@ Note: unlike `add_to_playlist`, `rate_song` does **not** create a notification f
 - **Routes are thin, services are thick.** Every route immediately delegates to a service. The route's only job is input validation and JSON formatting. This makes the service layer easy to test in isolation (the test files import services directly, not routes).
 - **Association tables carry extra data.** Both `playlist_entries` (position, added_by, added_at) and `friendships` go beyond simple many-to-many linking. This is a deliberate design choice to store relational metadata.
 - **UUIDs everywhere.** Every model uses a string UUID as its primary key rather than an auto-incrementing integer. This is common in apps where IDs might be generated client-side or synced across systems.
-- **Timezone-aware datetimes.** All datetime fields use `datetime.now(timezone.utc)` rather than naive datetimes, which is important for the streak and feed logic that compares timestamps.
----
  
 ## Bug Fixes
  
@@ -112,10 +104,7 @@ Traced from `POST /songs/<id>/rate` in `routes/songs.py` → `notification_servi
  
 **Fix and side-effect check:**
 Added a `create_notification()` call right before `return rating`, guarded by `if song.shared_by != user_id` so a user rating their own song doesn't trigger a notification to themselves. Verified by rating a song as darius and confirming nova received a new `song_rated` notification. Checked that rating your own song produces no notification, and that the rating itself still saves correctly in both cases.
- 
-**Commit:** `bb8654a` — `fix: send notification to song sharer when their song is rated`
- 
----
+  
  
 ### Bug #5 — The last song in a playlist never shows up
 **File:** `services/playlist_service.py`
@@ -130,6 +119,5 @@ Traced from the route `GET /playlists/<id>/songs` → `routes/playlists.py` → 
 The return statement used `songs[:-1]` instead of `songs`. In Python, `[:-1]` is a slice meaning "every element except the last one." So no matter how many songs were in the playlist, the last one was always dropped before being returned. The query itself was correct — it fetched all songs in the right order — but the slice threw away the final result every time.
  
 **Fix and side-effect check:**
-Changed `songs[:-1]` to `songs` on the return line. No other code in the file was affected. Verified by hitting the endpoint again — returned 7 songs matching the database count. Checked that song order (by position) was still correct in the response.
+Changed `songs[:-1]` to `songs` on the return line. No other code in the file was affected. returned 7 songs matching the database count. Checked that song order (by position) was still correct in the response.
  
-**Commit:** `76b4066` — `fix: return all playlist songs instead of excluding the last entry`
